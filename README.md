@@ -11,3 +11,10 @@
 
 - Add embeddings.py
     - Open the The_Verdict.txt which has 21K characters and read the file
+
+### 2
+
+- Create a simple token class
+    - Initialized from a book
+        - Remove all non-alphanumerics and store them as tokens {word: token}
+    - Provide encode and decode functions for sampled text

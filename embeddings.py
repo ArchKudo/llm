@@ -1,25 +1,36 @@
 import re
 
+
+class WordTokens:
+
+    def __init__(self, txt):
+
+        res = self._process(txt)
+        self.tokens = {val: idx for idx, val in enumerate(set(res))}
+        self.decoded = {idx: val for val, idx in self.tokens.items()}
+
+    def _process(self, txt):
+        pttrn = re.compile(r"[\W\s\n]+")
+        res = re.split(pttrn, txt)
+        return res
+
+    def encode(self, txt):
+        res = self._process(txt)
+        return [self.tokens[word] for word in res if word in self.tokens]
+
+    def decode(self, tokens):
+        return " ".join([self.decoded[token] for token in tokens])
+
+
 if __name__ == "__main__":
 
     with open("./The_Verdict.txt", "r", encoding="utf-8") as f:
-        raw_text = f.read()
+        book = f.read()
 
-    print(f"No. of characters: {len(raw_text)}")
-    print(f"Head: {raw_text[:99]}...")
+    embeddings = WordTokens(book)
 
-    # Match punctuation, whitespace
-    pttrn = r"[\W\s\n]+"
+    sent = embeddings.encode("silver trees are constantly destroyed")
 
-    # Split at above pattern
-    # Remove last empty string: res.count("")
-    res = re.split(pttrn, raw_text)[:-1]
+    print(sent)
 
-    # Unnecessary
-    # res = [x.strip() for x in res if re.match("\w+", x)]
-
-    print(res)
-
-    tokens = {idx: val for idx, val in enumerate(set(res))}
-
-    print(tokens)
+    print(embeddings.decode(sent))
