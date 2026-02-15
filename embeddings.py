@@ -6,7 +6,10 @@ class WordTokens:
     def __init__(self, txt):
 
         res = self._process(txt)
+        res += ["<unk>", "<end>"]
+
         self.tokens = {val: idx for idx, val in enumerate(set(res))}
+
         self.decoded = {idx: val for val, idx in self.tokens.items()}
 
     def _process(self, txt):
@@ -14,12 +17,26 @@ class WordTokens:
         res = re.split(pttrn, txt)
         return res
 
-    def encode(self, txt):
+    def _encode(self, txt):
         res = self._process(txt)
-        return [self.tokens[word] for word in res if word in self.tokens]
+
+        unk = self.tokens["<unk>"]
+        print(unk)
+        return [self.tokens.get(word, unk) for word in res]
 
     def decode(self, tokens):
         return " ".join([self.decoded[token] for token in tokens])
+
+    def encode(self, *txts):
+        end = self.tokens["<end>"]
+
+        res = []
+
+        for txt in txts:
+            res += self._encode(txt)
+            res.append(end)
+
+        return res
 
 
 if __name__ == "__main__":
@@ -29,8 +46,16 @@ if __name__ == "__main__":
 
     embeddings = WordTokens(book)
 
-    sent = embeddings.encode("silver trees are constantly destroyed")
+    sent = embeddings.encode("silver trees are constantly destroyed, unacceptable!")
 
     print(sent)
 
     print(embeddings.decode(sent))
+
+    par = embeddings.encode(
+        "silver trees are destroyed", "I believe constantly even, unacceptable"
+    )
+
+    print(par)
+
+    print(embeddings.decode(par))
