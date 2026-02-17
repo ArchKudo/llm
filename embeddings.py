@@ -10,30 +10,14 @@ if __name__ == "__main__":
     with open("./The_Verdict.txt", "r", encoding="utf-8") as f:
         book = f.read()
 
-    sent = tokenizer.encode(
-        "silver trees are constantly destroyed, unacceptable!",
-        allowed_special={"<|endoftext|>"},
-    )
+    encoded = tokenizer.encode(book)
 
-    print(sent)
+    print(len(encoded))
 
-    print(tokenizer.decode(sent))
+    context_sz = 4
 
-    par = tokenizer.encode(
-        """silver trees are destroyed.
+    x = encoded[:context_sz]
+    y = encoded[1 : context_sz + 1]
 
-
-        A new line for the unruly.
-        I believe constantly even, unacceptable!""",
-        allowed_special={"<|endoftext|>"},
-    )
-
-    print(par)
-
-    print(tokenizer.decode(par))
-
-    madeup = "sdffasdfasdf sdfasdfasdfsfasfsdfff asdfdfsfasdfasdfasfsfdasfsaf"
-
-    print(tokenizer.encode(madeup))
-    print(tokenizer.decode(tokenizer.encode(madeup)))
-    print(tokenizer.decode([21282]))
+    print(x)
+    print(f"\t{y}")
