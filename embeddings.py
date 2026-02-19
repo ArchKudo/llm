@@ -21,3 +21,11 @@ if __name__ == "__main__":
 
     print(x)
     print(f"\t{y}")
+
+    nextword = [
+        (encoded[i : context_sz + i], encoded[context_sz + i])
+        for i in range(len(encoded) // context_sz)
+    ]
+
+    print(encoded[-80:])
+    print(nextword[-5:])
