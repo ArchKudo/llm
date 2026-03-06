@@ -61,3 +61,11 @@ if __name__ == "__main__":
     first_batch = next(data_iter)
     print(first_batch)
     print(next(data_iter))
+
+    dataloader = create_dataloader(
+        book, batch_size=8, max_length=4, stride=4, shuffle=False
+    )
+
+    data_iter = iter(dataloader)
+    print(next(data_iter))
+    print(next(data_iter))
