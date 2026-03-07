@@ -69,3 +69,32 @@ if __name__ == "__main__":
     data_iter = iter(dataloader)
     print(next(data_iter))
     print(next(data_iter))
+
+    vocab_size = 50257
+    output_dim = 256
+
+    token_embedding_layer = torch.nn.Embedding(vocab_size, output_dim)
+
+    dataloader = create_dataloader(
+        book, batch_size=8, max_length=4, stride=4, shuffle=False
+    )
+
+    data_iter = iter(dataloader)
+    inputs, targets = next(data_iter)
+
+    token_embeddings = token_embedding_layer(inputs)
+    print(token_embeddings)
+    print(token_embeddings.shape)
+
+    context_length = 4
+    pos_embedding_layer = torch.nn.Embedding(context_length, output_dim)
+    pos_embeddings = pos_embedding_layer(torch.arange(context_length))
+
+    print(pos_embeddings)
+    print(pos_embeddings.shape)
+
+    # Broadcast pos_embeddings [1,4,256] -> [8,4,256]
+    input_embeddings = token_embeddings + pos_embeddings
+
+    print(input_embeddings)
+    print(input_embeddings.shape)
