@@ -1,5 +1,5 @@
 from itertools import islice
-from random import shuffle
+from random import shuffle, gauss
 
 import math
 import re
@@ -151,11 +151,11 @@ class Value:
 
         self.grad = 1
         for node in reversed(graph):
-            logger.info(f"\t Node: {node}")
-            logger.info(f"\t Children: {node._children}")
-            logger.info(f"\t Local Grads: {node._local_grads}")
+            logger.debug(f"\t Node: {node}")
+            logger.debug(f"\t Children: {node._children}")
+            logger.debug(f"\t Local Grads: {node._local_grads}")
             for child, local_grad in zip(node._children, node._local_grads):
-                logger.info(f"\t\t Child: {child}, Local Grad: {local_grad}")
+                logger.debug(f"\t\t Child: {child}, Local Grad: {local_grad}")
 
                 # child.grad = d(output)/d(child) = d(node)/d(child) * d(output)/d(node) = local_grad * node.grad
                 child.grad += local_grad * node.grad
@@ -194,7 +194,7 @@ if __name__ == "__main__":
     # Set Beginning of sequence as len + 1 for uniqueness
     BOS = len(unique_chars)
 
-    vocab = len(unique_chars) + 1
+    vocab_sz = len(unique_chars) + 1
 
     a = Value(5.0)
     b = Value(2.0)
@@ -203,6 +203,40 @@ if __name__ == "__main__":
 
     d.backward()
 
-    logger.info(a.grad)  # 14
-    logger.info(b.grad)  # 35
-    logger.info(c.grad)  # 10
+    logger.debug(a.grad)  # 14
+    logger.debug(b.grad)  # 35
+    logger.debug(c.grad)  # 10
+
+    # 4 Parameters
+
+    n_embed = 16
+    n_head = 4
+    n_layer = 1
+    block_sz = 16
+
+    head_dim = n_embed // n_head
+
+    def matrix(nout, nin, std=0.08):
+        return [[Value(gauss(0, std)) for _ in range(nin)] for _ in range(nout)]
+
+    state_dict = {
+        "wte": matrix(vocab_sz, n_embed),
+        "wpe": matrix(block_sz, n_embed),
+        "lm_head": matrix(vocab_sz, n_embed),
+    }
+
+    for i in range(n_layer):
+        state_dict[f"layer{i}.attn_wq"] = matrix(n_embed, n_embed)
+        state_dict[f"layer{i}.attn_wk"] = matrix(n_embed, n_embed)
+        state_dict[f"layer{i}.attn_wv"] = matrix(n_embed, n_embed)
+        state_dict[f"layer{i}.attn_wo"] = matrix(n_embed, n_embed)
+        state_dict[f"layer{i}.mlp_fc1"] = matrix(4 * n_embed, n_embed)
+        state_dict[f"layer{i}.mlp_fc2"] = matrix(n_embed, 4 * n_embed)
+
+    # flatten state dict
+    params = [p for mat in state_dict.values() for row in mat for p in row]
+
+    logger.info(len(params))
+
+    for k, v in state_dict.items():
+        logger.info(f"Table: {k} - {len(v)} x {len(v[0])}")
