@@ -240,3 +240,128 @@ if __name__ == "__main__":
 
     for k, v in state_dict.items():
         logger.info(f"Table: {k} - {len(v)} x {len(v[0])}")
+
+    # 5 Architecture
+
+    # matrix multiply vector with weights
+    # y = Wv
+    def linear(vec, weight):
+        return [sum(wi * vi for wi, vi in zip(wo, vec)) for wo in weight]
+
+    # convert from domain -inf - inf to 0,1
+    # e^ to make it positive and exp change for small values
+    # divide by sum to normalize
+    # softmax(zi) = exp(zi - m) / Σj=1->n exp(zj - m)
+    def softmax(logits):
+        maxval = max(val.data for val in logits)
+        exps = [(val - maxval).exp() for val in logits]
+        total = sum(exps)
+        return [exp / total for exp in exps]
+
+    # rms = (1/n * Σxi^2 + eps)^-1/2
+    # eps for keeping denominator always non-zero
+    def rmsnorm(x, eps=1e-5):
+        ms = sum(xi * xi for xi in x) / len(x)
+        scale = (ms + eps) ** -0.5
+
+        return [xi * scale for xi in x]
+
+    def gpt(tokid, posid, keys, vals):
+
+        tokemb = state_dict["wte"][tokid]
+        posemb = state_dict["wpe"][posid]
+
+        x = [t + p for t, p in zip(tokemb, posemb)]
+        x = rmsnorm(x)
+
+        for li in range(n_layer):
+            xresidual = x
+            x = rmsnorm(x)
+            q = linear(x, state_dict[f"layer{li}.attn_wq"])
+            k = linear(x, state_dict[f"layer{li}.attn_wk"])
+            v = linear(x, state_dict[f"layer{li}.attn_wv"])
+
+            keys[li].append(k)
+            values[li].append(v)
+
+            xattn = []
+
+            for h in range(n_head):
+                hs = h * head_dim
+                q_h = q[hs : hs + head_dim]
+                k_h = [ki[hs : hs + head_dim] for ki in keys[li]]
+                v_h = [vi[hs : hs + head_dim] for vi in values[li]]
+
+                attn_logits = [
+                    sum(q_h[j] * k_h[t][j] for j in range(head_dim)) / head_dim**0.5
+                    for t in range(len(k_h))
+                ]
+
+                attn_weights = softmax(attn_logits)
+
+                head_out = [
+                    sum(attn_weights[t] * v_h[t][j] for t in range(len(v_h)))
+                    for j in range(head_dim)
+                ]
+
+                xattn.extend(head_out)
+
+            x = linear(xattn, state_dict[f"layer{li}.attn_wo"])
+            x = [a + b for a, b in zip(x, xresidual)]
+
+            xresidual = x
+            x = rmsnorm(x)
+
+            x = linear(x, state_dict[f"layer{li}.mlp_fc1"])
+            x = [xi.relu() for xi in x]
+            x = linear(x, state_dict[f"layer{li}.mlp_fc2"])
+
+            x = [a + b for a, b in zip(x, xresidual)]
+
+        logits = linear(x, state_dict["lm_head"])
+
+        return logits
+
+    # 6 Training loop
+
+    λ, β1, β2, ε = 0.01, 0.85, 0.99, 1e-8
+
+    m = [0.0] * len(params)
+    v = [0.0] * len(params)
+
+    n_steps = 1000
+    for step in range(n_steps):
+        word = words[step % len(words)]
+        tokens = [BOS] + [unique_chars.index(ch) for ch in word] + [BOS]
+        n = min(block_sz, len(tokens) - 1)
+
+        keys, values = [[] for _ in range(n_layer)], [[] for _ in range(n_layer)]
+
+        losses = []
+
+        for posid in range(n):
+            tokenid, targetid = tokens[posid], tokens[posid + 1]
+            logits = gpt(tokenid, posid, keys, values)
+
+            probs = softmax(logits)
+
+            losst = -probs[targetid].log()
+            losses.append(losst)
+
+        loss = (1 / n) * sum(losses)
+
+        loss.backward()
+
+        lrt = λ * (1 - step / n_steps)
+
+        for i, param in enumerate(params):
+            m[i] = β1 * m[i] + (1 - β1) * param.grad
+            v[i] = β2 * v[i] + (1 - β2) * param.grad**2
+
+            m_hat = m[i] / (1 - β1 ** (step + 1))
+            v_hat = v[i] / (1 - β2 ** (step + 1))
+
+            param.data -= lrt * m_hat / (v_hat**0.5 + ε)
+            param.grad = 0
+
+        logger.info(f"Steps: {step + 1:4d} / {n_steps:4d} |" f"Loss: {loss.data:.4f}")
