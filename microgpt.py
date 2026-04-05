@@ -134,36 +134,35 @@ class Value:
         visited: set[Value] = set()
 
         # From video: topological sort of the graph
+        # def build_graph(node: Value):
+        #     logger.debug(f"Visiting node: {node}")
+        #     if node not in visited:
+        #         logger.debug(f"\tNode {node} not in {visited}")
+        #         visited.add(node)
+
+        #         for child in node._children:
+        #             logger.debug(
+        #                 f"\t\tBuilding for child: {child} of {node._children} for {node}"
+        #             )
+        #             build_graph(child)
+        #         graph.append(node)
+
         def build_graph(node: Value):
-            logger.debug(f"Visiting node: {node}")
-            if node not in visited:
-                logger.debug(f"\tNode {node} not in {visited}")
-                visited.add(node)
-                for child in node._children:
-                    logger.debug(
-                        f"\t\tBuilding for child: {child} of {node._children} for {node}"
+            stack = [node]
+            while stack:
+                curr = stack.pop()
+                if curr not in visited:
+                    visited.add(curr)
+                    stack.extend(
+                        child for child in curr._children if child not in visited
                     )
-                    build_graph(child)
-                graph.append(node)
+                    graph.append(curr)
 
         build_graph(self)
 
-        logger.debug(f"Built graph for {self}:")
-        for item in graph:
-            logger.debug(f"\t{item}")
-
-        logger.debug(f"Built rev graph for {self}:")
-        for item in reversed(graph):
-            logger.debug(f"\t{item}")
-
         self.grad = 1
         for node in reversed(graph):
-            logger.debug(f"\t Node: {node}")
-            logger.debug(f"\t Children: {node._children}")
-            logger.debug(f"\t Local Grads: {node._local_grads}")
             for child, local_grad in zip(node._children, node._local_grads):
-                logger.debug(f"\t\t Child: {child}, Local Grad: {local_grad}")
-
                 # child.grad = d(output)/d(child) = d(node)/d(child) * d(output)/d(node) = local_grad * node.grad
                 child.grad += local_grad * node.grad
 
@@ -207,10 +206,10 @@ if __name__ == "__main__":
 
     # 4 Parameters
 
-    N_EMBED: int = 1
-    N_HEAD: int = 1
+    N_EMBED: int = 16
+    N_HEAD: int = 4
     N_LAYER: int = 1
-    BLOCK_SZ: int = 1
+    BLOCK_SZ: int = 16
 
     HEAD_DIM: int = N_EMBED // N_HEAD
 
