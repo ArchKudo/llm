@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from itertools import islice
-from random import shuffle, gauss
+from random import shuffle, gauss, choices
 from typing import Tuple, Union
 
 import math
@@ -184,6 +184,8 @@ if __name__ == "__main__":
 
     words: list[str] = re.findall(r"\w+", book)
 
+    words = ["apple", "banana", "mango", "chikoo", "orange", "pineapple"]
+
     logger.debug(words[:10])
 
     # 2 tokenizer
@@ -205,10 +207,10 @@ if __name__ == "__main__":
 
     # 4 Parameters
 
-    N_EMBED: int = 16
-    N_HEAD: int = 4
+    N_EMBED: int = 1
+    N_HEAD: int = 1
     N_LAYER: int = 1
-    BLOCK_SZ: int = 16
+    BLOCK_SZ: int = 1
 
     HEAD_DIM: int = N_EMBED // N_HEAD
 
@@ -392,7 +394,7 @@ if __name__ == "__main__":
     m = [0.0] * len(params)
     v = [0.0] * len(params)
 
-    n_steps = 10
+    n_steps = 2
     for step in range(n_steps):
         logger.info(f"Training step {step + 1} / {n_steps}")
         word = words[step % len(words)]
@@ -430,3 +432,22 @@ if __name__ == "__main__":
             param.grad = 0
 
         logger.debug(f"Steps: {step + 1:4d} / {n_steps:4d} |" f"Loss: {loss.data:.4f}")
+
+    # 7 Inference
+    temperature = 0.5
+
+    for idx in range(20):
+        k, v = [[] for _ in range(N_LAYER)], [[] for _ in range(N_LAYER)]
+
+        tokid = BOS
+        sample = []
+
+        for posid in range(BLOCK_SZ):
+            logits = gpt(tokid, posid, k, v)
+            probs = softmax([(logit / temperature) for logit in logits])
+            tokid = choices(range(vocab_sz), weights=[p.data for p in probs])[0]
+            if tokid == BOS:
+                break
+            sample.append(unique_chars[tokid])
+
+        print(f"sample: {idx+1:2d} - {''.join(sample)}")
