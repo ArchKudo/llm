@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 from itertools import islice
 from random import shuffle, gauss
+from typing import Tuple, Union
 
 import math
 import re
@@ -24,31 +27,35 @@ class Value:
     # obj.newfield = 20 (fails)
     __slots__ = ("data", "grad", "_children", "_local_grads")
 
-    def __init__(self, data, children=(), local_grads=()):
+    def __init__(
+        self,
+        data: float,
+        children: Tuple["Value", ...] = (),
+        local_grads: Tuple[float, ...] = (),
+    ):
 
-        self.data = data
-        self.grad = 0
-        self._children = children
+        self.data: float = data
+        self.grad: float = 0
+        self._children: Tuple[Value, ...] = children
         # partial derivatives of output wrt each child
         # different from global grad which is calcuated on the final output after a long series of operations.
         # We calculate global grad of output
         # Store the local grad
         # Then for child we can apply chain rule to calculate global grad for child as local_grad * global_grad of output
-        self._local_grads = local_grads
+        self._local_grads: Tuple[float, ...] = local_grads
 
     def __repr__(self):
 
-        data = f"Data: {self.data}"
-        grad = f"Grad: {self.grad}"
-        children = ",\n".join(repr(child) for child in self._children)
-        local_grads = ",\n".join(repr(local_grad) for local_grad in self._local_grads)
+        # data: str = f"Data: {self.data}"
+        # grad: str = f"Grad: {self.grad}"
+        # children: str = ",\n".join(repr(child) for child in self._children)
+        # local_grads: str = ",\n".join(
+        #     repr(local_grad) for local_grad in self._local_grads
+        # )
 
-        return (
-            f"\nValue({data}, {grad},\n"
-            f"\t_children=\n{children}\t_local_grads=\n{local_grads})"
-        )
+        return f"Value(data={self.data}, grad={self.grad}, _children={self._children}, _local_grads={self._local_grads})"
 
-    def __add__(self, other):
+    def __add__(self, other: Union[Value, float]):
 
         # Making it even tighter with even lesser handling
         # it is not done for __pow__ function anyway
@@ -58,7 +65,7 @@ class Value:
 
         return Value(self.data + other.data, children=(self, other), local_grads=(1, 1))
 
-    def __mul__(self, other):
+    def __mul__(self, other: Union[Value, float]):
         other = other if isinstance(other, Value) else Value(other)
 
         # So that i don't have to jog memory each time
@@ -71,7 +78,7 @@ class Value:
             local_grads=(other.data, self.data),
         )
 
-    def __pow__(self, scalar):
+    def __pow__(self, scalar: float):
         # Another mem jog trailing comma to treat it as tuple even with single value`
         return Value(
             self.data**scalar,
@@ -123,11 +130,11 @@ class Value:
         return other * (self**-1)
 
     def backward(self):
-        graph = []
-        visited = set()
+        graph: list[Value] = []
+        visited: set[Value] = set()
 
         # From video: topological sort of the graph
-        def build_graph(node):
+        def build_graph(node: Value):
             logger.debug(f"Visiting node: {node}")
             if node not in visited:
                 logger.debug(f"\tNode {node} not in {visited}")
@@ -165,17 +172,17 @@ if __name__ == "__main__":
 
     # 1 dataset
     with open("./The_Verdict.txt", "r", encoding="utf-8") as f:
-        book = "".join(f.read().splitlines()[21:186])
+        book: str = "".join(f.read().splitlines()[21:186])
 
     logger.debug(book[:20])
 
-    sentences = set(sentence.strip() for sentence in book.split(".")) - {""}
+    sentences: set[str] = set(sentence.strip() for sentence in book.split(".")) - {""}
 
     logger.debug(len(sentences))
 
     logger.debug(list(islice(sentences, 10)))
 
-    words = re.findall(r"\w+", book)
+    words: list[str] = re.findall(r"\w+", book)
 
     logger.debug(words[:10])
 
@@ -187,72 +194,63 @@ if __name__ == "__main__":
     logger.debug(words[:10])
 
     # Only encode characters in the text here a-zA-Z_
-    unique_chars = sorted(set("".join(words)))
+    unique_chars: list[str] = sorted(set("".join(words)))
 
     logger.debug(unique_chars)
 
     # Set Beginning of sequence as len + 1 for uniqueness
-    BOS = len(unique_chars)
+    BOS: int = len(unique_chars)
 
     vocab_sz = len(unique_chars) + 1
 
-    a = Value(5.0)
-    b = Value(2.0)
-    c = Value(7.0)
-    d = a * b * c
-
-    d.backward()
-
-    logger.debug(a.grad)  # 14
-    logger.debug(b.grad)  # 35
-    logger.debug(c.grad)  # 10
-
     # 4 Parameters
 
-    n_embed = 16
-    n_head = 4
-    n_layer = 1
-    block_sz = 16
+    N_EMBED: int = 16
+    N_HEAD: int = 4
+    N_LAYER: int = 1
+    BLOCK_SZ: int = 16
 
-    head_dim = n_embed // n_head
+    HEAD_DIM: int = N_EMBED // N_HEAD
 
-    def matrix(nout, nin, std=0.08):
+    def matrix(nout: int, nin: int, std: float = 0.08) -> list[list[Value]]:
         return [[Value(gauss(0, std)) for _ in range(nin)] for _ in range(nout)]
 
-    state_dict = {
-        "wte": matrix(vocab_sz, n_embed),
-        "wpe": matrix(block_sz, n_embed),
-        "lm_head": matrix(vocab_sz, n_embed),
+    state_dict: dict[str, list[list[Value]]] = {
+        "wte": matrix(vocab_sz, N_EMBED),
+        "wpe": matrix(BLOCK_SZ, N_EMBED),
+        "lm_head": matrix(vocab_sz, N_EMBED),
     }
 
-    for i in range(n_layer):
-        state_dict[f"layer{i}.attn_wq"] = matrix(n_embed, n_embed)
-        state_dict[f"layer{i}.attn_wk"] = matrix(n_embed, n_embed)
-        state_dict[f"layer{i}.attn_wv"] = matrix(n_embed, n_embed)
-        state_dict[f"layer{i}.attn_wo"] = matrix(n_embed, n_embed)
-        state_dict[f"layer{i}.mlp_fc1"] = matrix(4 * n_embed, n_embed)
-        state_dict[f"layer{i}.mlp_fc2"] = matrix(n_embed, 4 * n_embed)
+    for i in range(N_LAYER):
+        state_dict[f"layer{i}.attn_wq"] = matrix(N_EMBED, N_EMBED)
+        state_dict[f"layer{i}.attn_wk"] = matrix(N_EMBED, N_EMBED)
+        state_dict[f"layer{i}.attn_wv"] = matrix(N_EMBED, N_EMBED)
+        state_dict[f"layer{i}.attn_wo"] = matrix(N_EMBED, N_EMBED)
+        state_dict[f"layer{i}.mlp_fc1"] = matrix(4 * N_EMBED, N_EMBED)
+        state_dict[f"layer{i}.mlp_fc2"] = matrix(N_EMBED, 4 * N_EMBED)
 
-    # flatten state dict
-    params = [p for mat in state_dict.values() for row in mat for p in row]
+    # Flatten state_dict into a single list of Value objects for optimization
+    params: list[Value] = [
+        elem for mat in state_dict.values() for row in mat for elem in row
+    ]
 
-    logger.info(len(params))
+    logger.debug(len(params))
 
     for k, v in state_dict.items():
-        logger.info(f"Table: {k} - {len(v)} x {len(v[0])}")
+        logger.debug(f"Table: {k} - {len(v)} x {len(v[0])}")
 
     # 5 Architecture
 
     # matrix multiply vector with weights
     # y = Wv
-    def linear(vec, weight):
+    def linear(vec: list[Value], weight: list[list[Value]]) -> list[Value]:
         return [sum(wi * vi for wi, vi in zip(wo, vec)) for wo in weight]
 
     # convert from domain -inf - inf to 0,1
     # e^ to make it positive and exp change for small values
     # divide by sum to normalize
     # softmax(zi) = exp(zi - m) / Σj=1->n exp(zj - m)
-    def softmax(logits):
+    def softmax(logits: list[Value]) -> list[Value]:
         maxval = max(val.data for val in logits)
         exps = [(val - maxval).exp() for val in logits]
         total = sum(exps)
@@ -260,65 +258,128 @@ if __name__ == "__main__":
 
     # rms = (1/n * Σxi^2 + eps)^-1/2
     # eps for keeping denominator always non-zero
-    def rmsnorm(x, eps=1e-5):
+    def rmsnorm(x: list[Value], eps: float = 1e-5) -> list[Value]:
         ms = sum(xi * xi for xi in x) / len(x)
         scale = (ms + eps) ** -0.5
 
         return [xi * scale for xi in x]
 
-    def gpt(tokid, posid, keys, vals):
+    def gpt(
+        tokid: int,
+        posid: int,
+        keys: list[list[list[Value]]],
+        vals: list[list[list[Value]]],
+    ) -> list[Value]:
 
-        tokemb = state_dict["wte"][tokid]
-        posemb = state_dict["wpe"][posid]
+        tokemb: list[Value] = state_dict["wte"][tokid]
+        posemb: list[Value] = state_dict["wpe"][posid]
 
-        x = [t + p for t, p in zip(tokemb, posemb)]
+        logger.debug(f"Token ID: {tokid}, Position ID: {posid}")
+
+        x: list[Value] = [t + p for t, p in zip(tokemb, posemb)]
+
+        logger.debug(f"Input embedding: {x}")
+
         x = rmsnorm(x)
 
-        for li in range(n_layer):
+        logger.debug(f"Input embedding after RMSNorm: {x}")
+
+        for li in range(N_LAYER):
             xresidual = x
+            logger.info(f"Layer {li + 1} / {N_LAYER}")
+            logger.debug(f"Gradient before RMSNorm: {[xi.grad for xi in x]}")
+
             x = rmsnorm(x)
+
+            logger.debug(f"Layer {li} - After RMSNorm: {x}")
+            logger.debug(f"Gradient change after RMSNorm: {[xi.grad for xi in x]}")
+
             q = linear(x, state_dict[f"layer{li}.attn_wq"])
             k = linear(x, state_dict[f"layer{li}.attn_wk"])
             v = linear(x, state_dict[f"layer{li}.attn_wv"])
 
+            logger.debug(f"Layer {li} - Query: {q}")
+            logger.debug(f"Layer {li} - Key: {k}")
+            logger.debug(f"Layer {li} - Value: {v}")
+
             keys[li].append(k)
-            values[li].append(v)
+            vals[li].append(v)
 
-            xattn = []
+            xattn: list[Value] = []
 
-            for h in range(n_head):
-                hs = h * head_dim
-                q_h = q[hs : hs + head_dim]
-                k_h = [ki[hs : hs + head_dim] for ki in keys[li]]
-                v_h = [vi[hs : hs + head_dim] for vi in values[li]]
+            for h in range(N_HEAD):
+                logger.info(f"Layer {li + 1} / {N_LAYER} - Head {h + 1} / {N_HEAD}")
+
+                hs = h * HEAD_DIM
+
+                logger.debug(f"li: {li}, h: {h}, hs: {hs}")
+                logger.debug(f"Slice: {hs}:{hs + HEAD_DIM}")
+
+                q_h = q[hs : hs + HEAD_DIM]
+                k_h = [ki[hs : hs + HEAD_DIM] for ki in keys[li]]
+                v_h = [vi[hs : hs + HEAD_DIM] for vi in vals[li]]
+
+                logger.debug(f"Layer {li} - Head {h} - Query slice: {q_h}")
+                logger.debug(f"Layer {li} - Head {h} - Key slices: {k_h}")
+                logger.debug(f"Layer {li} - Head {h} - Value slices: {v_h}")
 
                 attn_logits = [
-                    sum(q_h[j] * k_h[t][j] for j in range(head_dim)) / head_dim**0.5
+                    sum(q_h[j] * k_h[t][j] for j in range(HEAD_DIM)) / HEAD_DIM**0.5
                     for t in range(len(k_h))
                 ]
 
+                logger.debug(f"Layer {li} - Head {h} - Attention logits: {attn_logits}")
+
                 attn_weights = softmax(attn_logits)
+
+                logger.debug(
+                    f"Layer {li} - Head {h} - Attention weights: {attn_weights}"
+                )
 
                 head_out = [
                     sum(attn_weights[t] * v_h[t][j] for t in range(len(v_h)))
-                    for j in range(head_dim)
+                    for j in range(HEAD_DIM)
                 ]
+
+                logger.debug(f"Layer {li} - Head {h} - Head output: {head_out}")
 
                 xattn.extend(head_out)
 
+                logger.debug(f"Layer {li} - After concatenating head {h}: {xattn}")
+
             x = linear(xattn, state_dict[f"layer{li}.attn_wo"])
+
+            logger.debug(
+                f"Layer {li} - After linear projection of attention output: {x}"
+            )
+
             x = [a + b for a, b in zip(x, xresidual)]
+
+            logger.debug(f"Layer {li} - After adding residual connection: {x}")
 
             xresidual = x
+
+            logger.debug(f"Layer {li} - Before MLP - Input: {x}")
+
             x = rmsnorm(x)
+            logger.debug(f"Layer {li} - Before MLP - After RMSNorm: {x}")
+
+            # MLP
 
             x = linear(x, state_dict[f"layer{li}.mlp_fc1"])
+            logger.debug(f"Layer {li} - After MLP FC1: {x}")
+
             x = [xi.relu() for xi in x]
+            logger.debug(f"Layer {li} - After MLP ReLU: {x}")
+
             x = linear(x, state_dict[f"layer{li}.mlp_fc2"])
+            logger.debug(f"Layer {li} - After MLP FC2: {x}")
 
             x = [a + b for a, b in zip(x, xresidual)]
+            logger.debug(f"Layer {li} - After adding MLP residual connection: {x}")
 
         logits = linear(x, state_dict["lm_head"])
+        logger.debug(f"Logits: {logits}")
 
         return logits
 
@@ -326,16 +387,19 @@ if __name__ == "__main__":
 
     λ, β1, β2, ε = 0.01, 0.85, 0.99, 1e-8
 
+    logger.info(f"λ: {λ}, β1: {β1}, β2: {β2}, ε: {ε}")
+
     m = [0.0] * len(params)
     v = [0.0] * len(params)
 
-    n_steps = 1000
+    n_steps = 10
     for step in range(n_steps):
+        logger.info(f"Training step {step + 1} / {n_steps}")
         word = words[step % len(words)]
         tokens = [BOS] + [unique_chars.index(ch) for ch in word] + [BOS]
-        n = min(block_sz, len(tokens) - 1)
+        n = min(BLOCK_SZ, len(tokens) - 1)
 
-        keys, values = [[] for _ in range(n_layer)], [[] for _ in range(n_layer)]
+        keys, values = [[] for _ in range(N_LAYER)], [[] for _ in range(N_LAYER)]
 
         losses = []
 
@@ -355,6 +419,7 @@ if __name__ == "__main__":
         lrt = λ * (1 - step / n_steps)
 
         for i, param in enumerate(params):
+            logger.info(f"Updating parameter {i + 1} / {len(params)}")
             m[i] = β1 * m[i] + (1 - β1) * param.grad
             v[i] = β2 * v[i] + (1 - β2) * param.grad**2
 
@@ -364,4 +429,4 @@ if __name__ == "__main__":
             param.data -= lrt * m_hat / (v_hat**0.5 + ε)
             param.grad = 0
 
-        logger.info(f"Steps: {step + 1:4d} / {n_steps:4d} |" f"Loss: {loss.data:.4f}")
+        logger.debug(f"Steps: {step + 1:4d} / {n_steps:4d} |" f"Loss: {loss.data:.4f}")
