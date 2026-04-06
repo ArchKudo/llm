@@ -16,10 +16,10 @@ logger = logging.getLogger(__name__)
 
 # 4 Parameters
 
-N_EMBED: int = 4
-N_HEAD: int = 2
+N_EMBED: int = 16
+N_HEAD: int = 4
 N_LAYER: int = 1
-BLOCK_SZ: int = 4
+BLOCK_SZ: int = 16
 
 HEAD_DIM: int = N_EMBED // N_HEAD  # 2
 
@@ -331,7 +331,7 @@ def gpt(
 if __name__ == "__main__":
     # 1 dataset
     words = load_dataset()
-    words = ["apple", "banana", "mango", "chikoo", "orange", "pineapple"]
+    # words = ["apple", "banana", "mango", "chikoo", "orange", "pineapple"]
 
     # 2 tokenizer
     # Let's build a word hallucinator first before building one for sentences
@@ -354,7 +354,7 @@ if __name__ == "__main__":
     m = [0.0] * len(state_params)
     v = [0.0] * len(state_params)
 
-    n_steps = 2
+    n_steps = 1000
     for step in range(n_steps):
         logger.info(f"Training step {step + 1} / {n_steps}")
         word = words[step % len(words)]
@@ -391,7 +391,7 @@ if __name__ == "__main__":
             param.data -= lrt * m_hat / (v_hat**0.5 + ε)
             param.grad = 0
 
-        logger.debug(f"Steps: {step + 1:4d} / {n_steps:4d} |Loss: {loss.data:.4f}")
+        logger.info(f"Steps: {step + 1:4d} / {n_steps:4d} |Loss: {loss.data:.4f}")
 
     # 7 Inference
     temperature = 0.5
