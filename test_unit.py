@@ -1,5 +1,5 @@
-from hypothesis import given, strategies as st
 from microgpt import Value
+from hypothesis import given, strategies as st
 import math
 
 

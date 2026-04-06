@@ -7,7 +7,7 @@ version = "0.1.0"
 
 [tasks]
 test = { cmd = "pytest --hypothesis-show-statistics" }
-lint = { cmd = "ty . && ruff check ." }
+lint = { cmd = "ty check . && ruff check ." }
 format = { cmd = "ruff format ." }
 
 
@@ -16,6 +16,9 @@ clang = ">=22.1.0,<23"
 pytorch-cpu = ">=2.10.0,<3"
 pre-commit = ">=4.5.1,<5"
 tiktoken = ">=0.12.0,<0.13"
-ty = ">=0.0.28,<0.0.29"
-hypothesis = ">=6.151.10,<7"
+ty = ">=0.0.29,<0.0.30"
+hypothesis = ">=6.151.11,<7"
 pytest = ">=9.0.2,<10"
+ruff = ">=0.15.9,<0.16"
+python = ">=3.14.3,<3.15"
+

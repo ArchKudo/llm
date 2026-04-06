@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from itertools import islice
 from random import shuffle, gauss, choices
-from typing import Tuple, Union
+from typing import List, Tuple, Union
 
 import math
 import re
@@ -15,10 +14,18 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# 4 Parameters
+
+N_EMBED: int = 4
+N_HEAD: int = 2
+N_LAYER: int = 1
+BLOCK_SZ: int = 4
+
+HEAD_DIM: int = N_EMBED // N_HEAD  # 2
+
 
 # Class to calculate gradient
 class Value:
-
     # __slots__ is an attribute for restricting dynamic creation of fields
     # We apparently save memory by making them static
     # micro-optimizationgpt!
@@ -167,222 +174,176 @@ class Value:
                 child.grad += local_grad * node.grad
 
 
-if __name__ == "__main__":
+def load_dataset(path: str = "./The_Verdict.txt", slice=slice(21, 186)) -> List[str]:
+    with open(path, "r", encoding="utf-8") as f:
+        book: str = "".join(f.read().splitlines()[slice])
 
-    # 1 dataset
-    with open("./The_Verdict.txt", "r", encoding="utf-8") as f:
-        book: str = "".join(f.read().splitlines()[21:186])
-
-    logger.debug(book[:20])
-
-    sentences: set[str] = set(sentence.strip() for sentence in book.split(".")) - {""}
-
-    logger.debug(len(sentences))
-
-    logger.debug(list(islice(sentences, 10)))
+    # sentences: set[str] = set(sentence.strip() for sentence in book.split(".")) - {""}
 
     words: list[str] = re.findall(r"\w+", book)
-
-    words = ["apple", "banana", "mango", "chikoo", "orange", "pineapple"]
-
-    logger.debug(words[:10])
-
-    # 2 tokenizer
-    # Let's build a word hallucinator first before building one for sentences
-
     shuffle(words)
 
-    logger.debug(words[:10])
+    return words
 
-    # Only encode characters in the text here a-zA-Z_
-    unique_chars: list[str] = sorted(set("".join(words)))
 
-    logger.debug(unique_chars)
+def tokenize(words: list[str]) -> Tuple[list[str], int, int]:
+    charset: list[str] = sorted(set("".join(words)))
+    BOS: int = len(charset)
+    vocab_sz: int = len(charset) + 1
 
-    # Set Beginning of sequence as len + 1 for uniqueness
-    BOS: int = len(unique_chars)
+    return charset, BOS, vocab_sz
 
-    vocab_sz = len(unique_chars) + 1
 
-    # 4 Parameters
+def matrix(nout: int, nin: int, std: float = 0.08) -> list[list[Value]]:
+    return [[Value(gauss(0, std)) for _ in range(nin)] for _ in range(nout)]
 
-    N_EMBED: int = 16
-    N_HEAD: int = 4
-    N_LAYER: int = 1
-    BLOCK_SZ: int = 16
 
-    HEAD_DIM: int = N_EMBED // N_HEAD
-
-    def matrix(nout: int, nin: int, std: float = 0.08) -> list[list[Value]]:
-        return [[Value(gauss(0, std)) for _ in range(nin)] for _ in range(nout)]
-
+def state(vocab_sz: int) -> Tuple[dict[str, list[list[Value]]], list[Value]]:
     state_dict: dict[str, list[list[Value]]] = {
+        # word token embedding
         "wte": matrix(vocab_sz, N_EMBED),
+        # word position embedding
         "wpe": matrix(BLOCK_SZ, N_EMBED),
+        # Language model head
         "lm_head": matrix(vocab_sz, N_EMBED),
     }
 
     for i in range(N_LAYER):
+        # Attention query, key, value, output weights
         state_dict[f"layer{i}.attn_wq"] = matrix(N_EMBED, N_EMBED)
         state_dict[f"layer{i}.attn_wk"] = matrix(N_EMBED, N_EMBED)
         state_dict[f"layer{i}.attn_wv"] = matrix(N_EMBED, N_EMBED)
         state_dict[f"layer{i}.attn_wo"] = matrix(N_EMBED, N_EMBED)
+        # First and second feed-forward layer weights
         state_dict[f"layer{i}.mlp_fc1"] = matrix(4 * N_EMBED, N_EMBED)
         state_dict[f"layer{i}.mlp_fc2"] = matrix(N_EMBED, 4 * N_EMBED)
 
     # Flatten state_dict into a single list of Value objects for optimization
-    params: list[Value] = [
+    state_params: list[Value] = [
         elem for mat in state_dict.values() for row in mat for elem in row
     ]
 
-    logger.debug(len(params))
+    return state_dict, state_params
 
-    for k, v in state_dict.items():
-        logger.debug(f"Table: {k} - {len(v)} x {len(v[0])}")
 
-    # 5 Architecture
-
+def linear(vec: list[Value], weight: list[list[Value]]) -> list[Value]:
+    """
     # matrix multiply vector with weights
     # y = Wv
-    def linear(vec: list[Value], weight: list[list[Value]]) -> list[Value]:
-        return [sum(wi * vi for wi, vi in zip(wo, vec)) for wo in weight]
+    """
+    return [sum(wi * vi for wi, vi in zip(wo, vec)) for wo in weight]
 
+
+def softmax(logits: list[Value]) -> list[Value]:
+    """
     # convert from domain -inf - inf to 0,1
     # e^ to make it positive and exp change for small values
     # divide by sum to normalize
     # softmax(zi) = exp(zi - m) / Σj=1->n exp(zj - m)
-    def softmax(logits: list[Value]) -> list[Value]:
-        maxval = max(val.data for val in logits)
-        exps = [(val - maxval).exp() for val in logits]
-        total = sum(exps)
-        return [exp / total for exp in exps]
+    """
+    maxval = max(val.data for val in logits)
+    exps = [(val - maxval).exp() for val in logits]
+    total = sum(exps)
+    return [exp / total for exp in exps]
 
-    # rms = (1/n * Σxi^2 + eps)^-1/2
+
+def rmsnorm(x: list[Value], eps: float = 1e-5) -> list[Value]:
+    """
+    # RMS = (1/n * Σxi^2 + eps)^-1/2
     # eps for keeping denominator always non-zero
-    def rmsnorm(x: list[Value], eps: float = 1e-5) -> list[Value]:
-        ms = sum(xi * xi for xi in x) / len(x)
-        scale = (ms + eps) ** -0.5
+    """
+    ms = sum(xi * xi for xi in x) / len(x)
+    scale = (ms + eps) ** -0.5
 
-        return [xi * scale for xi in x]
+    return [xi * scale for xi in x]
 
-    def gpt(
-        tokid: int,
-        posid: int,
-        keys: list[list[list[Value]]],
-        vals: list[list[list[Value]]],
-    ) -> list[Value]:
 
-        tokemb: list[Value] = state_dict["wte"][tokid]
-        posemb: list[Value] = state_dict["wpe"][posid]
+def gpt(
+    tokid: int,
+    posid: int,
+    keys: list[list[list[Value]]],
+    vals: list[list[list[Value]]],
+    state_dict: dict[str, list[list[Value]]],
+) -> list[Value]:
 
-        logger.debug(f"Token ID: {tokid}, Position ID: {posid}")
+    tokemb: list[Value] = state_dict["wte"][tokid]
+    posemb: list[Value] = state_dict["wpe"][posid]
 
-        x: list[Value] = [t + p for t, p in zip(tokemb, posemb)]
+    x: list[Value] = [t + p for t, p in zip(tokemb, posemb)]
+    logger.info(f"max x: {max(x, key=lambda xi: xi.data).data}")
 
-        logger.debug(f"Input embedding: {x}")
+    x = rmsnorm(x)
+    logger.info(f"max x after rmsnorm: {max(x, key=lambda xi: xi.data).data}")
 
+    for li in range(N_LAYER):
+        logger.info(f"Layer {li + 1} / {N_LAYER}")
+
+        xresidual = x
         x = rmsnorm(x)
 
-        logger.debug(f"Input embedding after RMSNorm: {x}")
+        q = linear(x, state_dict[f"layer{li}.attn_wq"])
+        k = linear(x, state_dict[f"layer{li}.attn_wk"])
+        v = linear(x, state_dict[f"layer{li}.attn_wv"])
 
-        for li in range(N_LAYER):
-            xresidual = x
-            logger.info(f"Layer {li + 1} / {N_LAYER}")
-            logger.debug(f"Gradient before RMSNorm: {[xi.grad for xi in x]}")
+        keys[li].append(k)
+        vals[li].append(v)
 
-            x = rmsnorm(x)
+        xattn: list[Value] = []
 
-            logger.debug(f"Layer {li} - After RMSNorm: {x}")
-            logger.debug(f"Gradient change after RMSNorm: {[xi.grad for xi in x]}")
+        for h in range(N_HEAD):
+            logger.info(f"Layer {li + 1} / {N_LAYER} - Head {h + 1} / {N_HEAD}")
 
-            q = linear(x, state_dict[f"layer{li}.attn_wq"])
-            k = linear(x, state_dict[f"layer{li}.attn_wk"])
-            v = linear(x, state_dict[f"layer{li}.attn_wv"])
+            hs = h * HEAD_DIM
+            q_h = q[hs : hs + HEAD_DIM]
+            k_h = [ki[hs : hs + HEAD_DIM] for ki in keys[li]]
+            v_h = [vi[hs : hs + HEAD_DIM] for vi in vals[li]]
 
-            logger.debug(f"Layer {li} - Query: {q}")
-            logger.debug(f"Layer {li} - Key: {k}")
-            logger.debug(f"Layer {li} - Value: {v}")
+            attn_logits = [
+                sum(q_h[j] * k_h[t][j] for j in range(HEAD_DIM)) / HEAD_DIM**0.5
+                for t in range(len(k_h))
+            ]
 
-            keys[li].append(k)
-            vals[li].append(v)
+            attn_weights = softmax(attn_logits)
+            head_out = [
+                sum(attn_weights[t] * v_h[t][j] for t in range(len(v_h)))
+                for j in range(HEAD_DIM)
+            ]
 
-            xattn: list[Value] = []
+            xattn.extend(head_out)
 
-            for h in range(N_HEAD):
-                logger.info(f"Layer {li + 1} / {N_LAYER} - Head {h + 1} / {N_HEAD}")
+        x = linear(xattn, state_dict[f"layer{li}.attn_wo"])
+        x = [a + b for a, b in zip(x, xresidual)]
 
-                hs = h * HEAD_DIM
+        xresidual = x
+        x = rmsnorm(x)
 
-                logger.debug(f"li: {li}, h: {h}, hs: {hs}")
-                logger.debug(f"Slice: {hs}:{hs + HEAD_DIM}")
+        # MLP
+        x = linear(x, state_dict[f"layer{li}.mlp_fc1"])
+        x = [xi.relu() for xi in x]
+        x = linear(x, state_dict[f"layer{li}.mlp_fc2"])
+        x = [a + b for a, b in zip(x, xresidual)]
 
-                q_h = q[hs : hs + HEAD_DIM]
-                k_h = [ki[hs : hs + HEAD_DIM] for ki in keys[li]]
-                v_h = [vi[hs : hs + HEAD_DIM] for vi in vals[li]]
+    logits = linear(x, state_dict["lm_head"])
 
-                logger.debug(f"Layer {li} - Head {h} - Query slice: {q_h}")
-                logger.debug(f"Layer {li} - Head {h} - Key slices: {k_h}")
-                logger.debug(f"Layer {li} - Head {h} - Value slices: {v_h}")
+    return logits
 
-                attn_logits = [
-                    sum(q_h[j] * k_h[t][j] for j in range(HEAD_DIM)) / HEAD_DIM**0.5
-                    for t in range(len(k_h))
-                ]
 
-                logger.debug(f"Layer {li} - Head {h} - Attention logits: {attn_logits}")
+if __name__ == "__main__":
+    # 1 dataset
+    words = load_dataset()
+    words = ["apple", "banana", "mango", "chikoo", "orange", "pineapple"]
 
-                attn_weights = softmax(attn_logits)
+    # 2 tokenizer
+    # Let's build a word hallucinator first before building one for sentences
+    charset, BOS, vocab_sz = tokenize(words)
 
-                logger.debug(
-                    f"Layer {li} - Head {h} - Attention weights: {attn_weights}"
-                )
+    # 4 state variables
+    state_dict, state_params = state(vocab_sz)
+    logger.debug(len(state_params))
+    for k, v in state_dict.items():
+        logger.debug(f"Table: {k} - {len(v)} x {len(v[0])}")
 
-                head_out = [
-                    sum(attn_weights[t] * v_h[t][j] for t in range(len(v_h)))
-                    for j in range(HEAD_DIM)
-                ]
-
-                logger.debug(f"Layer {li} - Head {h} - Head output: {head_out}")
-
-                xattn.extend(head_out)
-
-                logger.debug(f"Layer {li} - After concatenating head {h}: {xattn}")
-
-            x = linear(xattn, state_dict[f"layer{li}.attn_wo"])
-
-            logger.debug(
-                f"Layer {li} - After linear projection of attention output: {x}"
-            )
-
-            x = [a + b for a, b in zip(x, xresidual)]
-
-            logger.debug(f"Layer {li} - After adding residual connection: {x}")
-
-            xresidual = x
-
-            logger.debug(f"Layer {li} - Before MLP - Input: {x}")
-
-            x = rmsnorm(x)
-            logger.debug(f"Layer {li} - Before MLP - After RMSNorm: {x}")
-
-            # MLP
-
-            x = linear(x, state_dict[f"layer{li}.mlp_fc1"])
-            logger.debug(f"Layer {li} - After MLP FC1: {x}")
-
-            x = [xi.relu() for xi in x]
-            logger.debug(f"Layer {li} - After MLP ReLU: {x}")
-
-            x = linear(x, state_dict[f"layer{li}.mlp_fc2"])
-            logger.debug(f"Layer {li} - After MLP FC2: {x}")
-
-            x = [a + b for a, b in zip(x, xresidual)]
-            logger.debug(f"Layer {li} - After adding MLP residual connection: {x}")
-
-        logits = linear(x, state_dict["lm_head"])
-        logger.debug(f"Logits: {logits}")
-
-        return logits
+    # 5 Architecture
 
     # 6 Training loop
 
@@ -390,14 +351,14 @@ if __name__ == "__main__":
 
     logger.info(f"λ: {λ}, β1: {β1}, β2: {β2}, ε: {ε}")
 
-    m = [0.0] * len(params)
-    v = [0.0] * len(params)
+    m = [0.0] * len(state_params)
+    v = [0.0] * len(state_params)
 
     n_steps = 2
     for step in range(n_steps):
         logger.info(f"Training step {step + 1} / {n_steps}")
         word = words[step % len(words)]
-        tokens = [BOS] + [unique_chars.index(ch) for ch in word] + [BOS]
+        tokens = [BOS] + [charset.index(ch) for ch in word] + [BOS]
         n = min(BLOCK_SZ, len(tokens) - 1)
 
         keys, values = [[] for _ in range(N_LAYER)], [[] for _ in range(N_LAYER)]
@@ -406,7 +367,7 @@ if __name__ == "__main__":
 
         for posid in range(n):
             tokenid, targetid = tokens[posid], tokens[posid + 1]
-            logits = gpt(tokenid, posid, keys, values)
+            logits = gpt(tokenid, posid, keys, values, state_dict)
 
             probs = softmax(logits)
 
@@ -419,8 +380,8 @@ if __name__ == "__main__":
 
         lrt = λ * (1 - step / n_steps)
 
-        for i, param in enumerate(params):
-            logger.info(f"Updating parameter {i + 1} / {len(params)}")
+        for i, param in enumerate(state_params):
+            logger.info(f"Updating parameter {i + 1} / {len(state_params)}")
             m[i] = β1 * m[i] + (1 - β1) * param.grad
             v[i] = β2 * v[i] + (1 - β2) * param.grad**2
 
@@ -430,7 +391,7 @@ if __name__ == "__main__":
             param.data -= lrt * m_hat / (v_hat**0.5 + ε)
             param.grad = 0
 
-        logger.debug(f"Steps: {step + 1:4d} / {n_steps:4d} |" f"Loss: {loss.data:.4f}")
+        logger.debug(f"Steps: {step + 1:4d} / {n_steps:4d} |Loss: {loss.data:.4f}")
 
     # 7 Inference
     temperature = 0.5
@@ -442,11 +403,11 @@ if __name__ == "__main__":
         sample = []
 
         for posid in range(BLOCK_SZ):
-            logits = gpt(tokid, posid, k, v)
+            logits = gpt(tokid, posid, k, v, state_dict)
             probs = softmax([(logit / temperature) for logit in logits])
             tokid = choices(range(vocab_sz), weights=[p.data for p in probs])[0]
             if tokid == BOS:
                 break
-            sample.append(unique_chars[tokid])
+            sample.append(charset[tokid])
 
-        print(f"sample: {idx+1:2d} - {''.join(sample)}")
+        print(f"sample: {idx + 1:2d} - {''.join(sample)}")
